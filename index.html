@@ -21,8 +21,8 @@
     <script type="text/javascript" src="https://skyway.io/dist/0.3/peer.js"></script>
     <script src="https://skyway.io/dist/screenshare.js"></script>
     <link rel="stylesheet" type="text/css" href="example.css">
-    <script src="../chat-ui/chat-ui.js"></script>
-    <link href="../chat-ui/chat-ui.css" rel="stylesheet" media="all"/>
+    <script src="chat-ui/chat-ui.js"></script>
+    <link href="chat-ui/chat-ui.css" rel="stylesheet" media="all"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.4.0/styles/darkula.min.css">
     <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" rel="stylesheet">
 
@@ -30,6 +30,8 @@
             src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.4.0/highlight.min.js"></script>
     <script type="text/javascript"
             src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.4.0/languages/javascript.min.js"></script>
+
+    <script src="bundle.js"></script>
     <style>
         .input-container {
             width: 370px;
@@ -98,22 +100,38 @@
 
     <script>
 
+        mqtt = null;
+        peer = null;
+        chat = null;
         // Compatibility shim
         AdapterJS.webRTCReady(function (isUsingPlugin) {
             navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
 
             // PeerJS object
-            var peer = new Peer({key: '4050f535-fc75-468e-82f8-a4d5c16cf7bf', debug: 3});
+            peer = new Peer({key: '4050f535-fc75-468e-82f8-a4d5c16cf7bf', debug: 3});
             var screen = new SkyWay.ScreenShare({debug: true});
 
             peer.on('open', function () {
                 $('#my-id').text(peer.id);
+                mqtt = new MQTT();
+                mqtt.clientId = peer.id;
+                mqtt.initialize();
+                mqtt.onMessage = function (payload) {
+                    console.log(payload["from"]);
+                    console.log(payload["message"]);
+                    console.log(peer.id);
+                    var side = payload["from"] === peer.id ? "user" : "chat";
+                    var message = {side: side, message: payload["message"]};
+                    chat.trigger('add-phrase', message);
+                }
             });
 
             // Receiving a call
             peer.on('call', function (call) {
                 // Answer the call automatically (instead of prompting user) for demo purposes
+                console.log(call.peer);
                 call.answer(window.localStream);
+                mqtt.updateSubscriptionTopic(call.peer);
                 step3(call);
             });
             peer.on('error', function (err) {
@@ -126,13 +144,16 @@
             $(function () {
                 $('#make-call').click(function () {
                     // Initiate a call!
-                    var call = peer.call($('#callto-id').val(), window.localStream);
+                    var peerId = $('#callto-id').val();
+                    var call = peer.call(peerId, window.localStream);
+                    mqtt.updateSubscriptionTopic(peer.id);
 
                     step3(call);
                 });
 
                 $('#end-call').click(function () {
                     window.existingCall.close();
+                    mqtt.endSubscription();
                     step2();
                 });
 
@@ -251,6 +272,7 @@
             function step2() {
                 $('#step1, #step3').hide();
                 $('#step2').show();
+                mqtt.endSubscription();
             }
 
             function step3(call) {
@@ -274,16 +296,19 @@
 
         });
 
-        $(document).ready(function() {
-            var chat = ChatUI({
-                title: 'John Doe',
-                avatar: './john-doe.jpg',
-                subtitle: 'consultant'
-            }).render('#chat', 'dialog');
+        $(document).ready(function () {
+            chat = ChatUI().render('#chat', 'dialog');
 
             chat.trigger('open-chat');
 
-            chat.trigger('add-phrase', 'Hello');
+            $('#input-table').on('submit', function () {
+                var text = $('#input-field').val();
+                if (text.length > 0) {
+                    mqtt.publish(peer.id, text);
+                }
+                $('#input-field').val('');
+                return false;
+            });
 
         });
     </script>
@@ -333,7 +358,7 @@
             <input type="checkbox" id="audio-enabled-checkbox" checked="checked"/>
             <br/>
 
-            <p>Screen sharing</p>
+            <label>Screen sharing: </label>
             <input type="checkbox" id="screen-sharing-enabled-checkbox"/>
         </div>
 
@@ -347,9 +372,10 @@
         <div class="container">
             <div id="chat" class="input-container"></div>
             <div id="input" class="input-container">
-                <form class="input-table">
+                <form id="input-table">
                     <div class="input-table__cell">
-                        <input type="text" class="input-table__input-field" placeholder="Enter your message">
+                        <input type="text" class="input-table__input-field" placeholder="Enter your message"
+                               id="input-field">
                     </div>
                     <div class="input-table__cell">
                         <button type="submit" class="input-table__send">Send</button>
@@ -359,8 +385,6 @@
         </div>
     </div>
 
-    <script src="aws-iot-sdk-browser-bundle.js"></script>
-    <script src="bundle.js"></script>
 </div>
 
 
